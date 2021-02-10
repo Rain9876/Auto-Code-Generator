@@ -35,7 +35,7 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch):
 
 def validate(tokenizer, model, loader, generate=True, interval = 1000):
     model.eval()
-    avg_loss = []
+    val_loss = []
     predictions = []
     actuals = []
 
@@ -56,7 +56,7 @@ def validate(tokenizer, model, loader, generate=True, interval = 1000):
             outputs = model(input_ids=ids, attention_mask=mask, lm_labels=lm_labels)
 
             loss = outputs[0]
-            avg_loss.append(loss.item())
+            val_loss.append(loss.item())
 
             if generate:
                 t0 = time.time()
@@ -77,7 +77,7 @@ def validate(tokenizer, model, loader, generate=True, interval = 1000):
 
                 if iteration % 100 == 0:
                     print(
-                        f'[Generation] batch: {iteration}/{len(loader)}, Loss: {sum(avg_loss[-100:]) / 100}, Time per gen: {gen_time}s')
+                        f'[Generation] batch: {iteration}/{len(loader)}, Loss: {sum(val_loss[-100:]) / 100}, Time per gen: {gen_time}s')
 
                 predictions.extend(preds)
                 actuals.extend(target)
@@ -85,9 +85,9 @@ def validate(tokenizer, model, loader, generate=True, interval = 1000):
             else:
                 if iteration % interval == 0:
                     print(
-                        f'[Validation] batch: {iteration}/{len(loader)}, Loss: {sum(avg_loss[-interval:]) / interval}')
+                        f'[Validation] batch: {iteration}/{len(loader)}, Loss: {sum(val_loss[-interval:]) / interval}')
 
-    return predictions, actuals, sum(avg_loss) / len(avg_loss)
+    return predictions, actuals, val_loss
 
 
 def save_checkpoint(step, model, opt, lr_sch, loss, min_loss, best_model=True, last_model=True, suffix=""):
@@ -109,11 +109,8 @@ def load_checkpoint(PATH, model, opt, lr_sch):
     checkpoint = torch.load(PATH)
     model.load_state_dict(checkpoint['model_state'])
     opt.load_state_dict(checkpoint['optimizer_state'])
-    lr_sch.optimizer = opt
-    lr_sch.lrs = checkpoint["lr_sch_state"]["lrs"]
-    lr_sch.last_step = checkpoint["lr_sch_state"]["last_step"]
-    lr_sch.base_lrs = checkpoint["lr_sch_state"]["base_lrs"]
-    step = checkpoint['step'] + 1
+    step = checkpoint['step']+1
+    lr_sch = lr_sch.load_state_dict(checkpoint['lr_sch_state'])
     return model, opt, step, lr_sch
 
 
@@ -205,6 +202,8 @@ def pretraining():
     avg_loss = []
     train_loss = []
     val_loss = []
+    test_loss = []
+
     metrics = {}
 
     train_interval = 2000
@@ -252,13 +251,15 @@ def pretraining():
             # Validation
             if step % val_interval == 0:
                 _, _, val_loss_ = validate(tokenizer, model, val_loader, generate=False)
-                print("Average val loss ", val_loss_)
-                val_loss.append(val_loss_)
-                save_checkpoint(step, model, optimizer, lr_sch, val_loss, min(val_loss))  # Early stop for best Loss
+                avg_val_loss = sum(val_loss_) / len(val_loss_)
+                print("Average val loss ", avg_val_loss)
+                save_checkpoint(step, model, optimizer, lr_sch, avg_val_loss, min(val_loss))  # Early stop for best Loss
+                val_loss.append(avg_val_loss)
+
 
 
     # Generate Code
-    prediction, actual, val_loss = validate(tokenizer, model, val_loader_generate, generate=True)
+    prediction, actual, _ = validate(tokenizer, model, val_loader_generate, generate=True)
     rouge = calculate_rouge(prediction, actual)
     metrics["rouge"].append(rouge)
     print("Rouge score", rouge)
@@ -270,6 +271,7 @@ def pretraining():
     Info = {
         "train_loss": train_loss, 
         "val_loss": val_loss,  
+        "test_loss": test_loss,
         "rouge": rouge, 
         "num_of_epochs": config.TRAIN_EPOCHS,
         "num_of_steps": steps
