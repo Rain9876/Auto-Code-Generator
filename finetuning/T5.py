@@ -1,7 +1,7 @@
 from torch.utils.data import DataLoader
 from transformers import T5Tokenizer, T5ForConditionalGeneration, T5Config
 from Utils import *
-from Dataset import MIMICDataset
+from dataset.Dataset import CSN_Dataset
 import collections
 
 set_rand_seeds()
@@ -19,7 +19,7 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch):
     ids = data['input_ids'].to(device, dtype=torch.long)
     mask = data['attention_mask'].to(device, dtype=torch.long)
 
-    outputs = model(input_ids=ids, attention_mask=mask, lm_labels=lm_labels)
+    outputs = model(input_ids=ids, attention_mask=mask, labels=lm_labels)
 
     loss = outputs[0]
 
@@ -33,6 +33,7 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch):
 
 
 def validate(tokenizer, model, loader, generate=True, interval = 1000):
+
     model.eval()
     val_loss = []
     predictions = []
@@ -42,7 +43,7 @@ def validate(tokenizer, model, loader, generate=True, interval = 1000):
 
         for iteration, data in enumerate(loader, 1):
 
-            source_ids, source_mask, y = PretrainDataset.trim_seq2seq_batch(data, tokenizer.pad_token_id)
+            source_ids, source_mask, y = CSN_Dataset.trim_seq2seq_batch(data, tokenizer.pad_token_id)
 
             y = y.to(device, dtype=torch.long)
 
@@ -52,7 +53,7 @@ def validate(tokenizer, model, loader, generate=True, interval = 1000):
             ids = source_ids.to(device, dtype=torch.long)
             mask = source_mask.to(device, dtype=torch.long)
 
-            outputs = model(input_ids=ids, attention_mask=mask, lm_labels=lm_labels)
+            outputs = model(input_ids=ids, attention_mask=mask, labels=lm_labels)
 
             loss = outputs[0]
             val_loss.append(loss.item())
@@ -114,17 +115,14 @@ def load_checkpoint(PATH, model, opt, lr_sch):
 
 
 
-def data_process(config, tokenizer):
+def data_process(config, tokenizer, data_type, data_size):
     # Creating the Training and Validation dataset for further creation of Dataloader
-    training_set = MIMICDataset(config.DATA_DIR, tokenizer, config.MAX_SRC_LEN, config.MAX_TGT_LEN, "train", 20000)
-    val_set = MIMICDataset(config.DATA_DIR, tokenizer, config.MAX_SRC_LEN, config.MAX_TGT_LEN, "val", 2000)
-    val_set_generate = MIMICDataset(config.DATA_DIR, tokenizer, config.MAX_SRC_LEN, config.MAX_TGT_LEN, "val", 200)
-    test_set = MIMICDataset(config.DATA_DIR, tokenizer, config.MAX_SRC_LEN, config.MAX_TGT_LEN, "test", 2000)
+    data_set = CSN_Dataset(config.DATA_DIR, tokenizer, config.MAX_SRC_LEN, config.MAX_TGT_LEN, data_type, data_size)
 
     # Defining the parameters for creation of dataloaders
     train_params = {
         'batch_size': config.TRAIN_BATCH_SIZE,
-        'shuffle': True,
+        'shuffle': False,
         'num_workers': 4
     }
 
@@ -134,55 +132,49 @@ def data_process(config, tokenizer):
         'num_workers': 2
     }
 
-    test_params = {
-        'batch_size': config.TEST_BATCH_SIZE,
-        'shuffle': False,
-        'num_workers': 2
-    }
-
     # Creation of Dataloaders for testing and validation. This will be used down for training and validation stage for the model.
-    training_loader = DataLoader(training_set, **train_params)
-    val_loader = DataLoader(val_set, **val_params)
-    val_loader_generate = DataLoader(val_set_generate, **val_params)
-    test_loader = DataLoader(test_set, **test_params)
+    if "train" in data_type:
+        data_loader = DataLoader(data_set, **train_params)
+        print("Training_samples:", len(data_set))
+    elif "val" in data_type:
+        data_loader = DataLoader(data_set, **val_params)
+        print("Val_samples:", len(data_set))
+    elif "test" in data_type:
+        data_loader = DataLoader(data_set, **val_params)
+        print("Test_samples:", len(data_set))
 
-    print("Training_samples:", len(training_set))
-    print("Validating_samples:", len(val_set))
-    print("Validating generate samples:", len(val_set_generate))
-    print("Testing_samples:", len(test_set))
+    return data_loader
 
-    return training_loader, val_loader, val_loader_generate, test_loader
 
 
 
 def fine_tuning():
 
-  param = collections.namedtuple('param', ["TRAIN_BATCH_SIZE", "VALID_BATCH_SIZE", "TEST_BATCH_SIZE", "TRAIN_EPOCHS", "TRAIN_STEPS",
-                                             "TEST_EPOCHS", "LEARNING_RATE", "MAX_SRC_LEN", "MAX_TGT_LEN", "DATA_DIR", "RESUME_PATH"
+    param = collections.namedtuple('param', ["TRAIN_BATCH_SIZE", "VALID_BATCH_SIZE", "TEST_BATCH_SIZE", "TRAIN_EPOCHS", "TRAIN_STEPS",
+                                             "TEST_EPOCHS", "LEARNING_RATE", "MAX_SRC_LEN", "MAX_TGT_LEN", "DATA_DIR", "RESUME_PATH",
                                              "RESUME"])
 
     config = param(
-
-        TRAIN_BATCH_SIZE=8,  # input batch size for training_loader
-        VALID_BATCH_SIZE=4,  # input batch size for testing
-        TEST_BATCH_SIZE=4,  # input batch size for testing
-        TRAIN_EPOCHS=100,  # number of epochs to train
-        TRAIN_STEPS = 75000,
-        TEST_EPOCHS=1,
+        TRAIN_BATCH_SIZE= 8,  # input batch size for training_loader
+        VALID_BATCH_SIZE= 4,  # input batch size for testing
+        TEST_BATCH_SIZE= 4,  # input batch size for testing
+        TRAIN_EPOCHS= 100,  # number of epochs to train
+        TRAIN_STEPS = 5000,
+        TEST_EPOCHS = 1,
         LEARNING_RATE=1e-5,  # learning rate (default: 0.01)
-        MAX_SRC_LEN=512,
+        MAX_SRC_LEN=256,
         MAX_TGT_LEN=512,
-        DATA_DIR="/home/song/Desktop/IndividualProject/fine_tuning/data/ontol",
-        RESUME_PATH = "/home/song/Desktop/pretrain/last_model.ckpt",
-        RESUME=True
+        DATA_DIR = "/home/song/Desktop/Auto-Code-Generator/data_processing/processed_data/finetuning",
+        RESUME_PATH = "",
+        RESUME=False
     )
 
 
     # tokenzier for encoding the text
     tokenizer = T5Tokenizer.from_pretrained("t5-base")
-    T5_config = T5Config().from_pretrained("t5-base")
-    model = T5ForConditionalGeneration(config=T5_config)
-    # model = T5ForConditionalGeneration.from_pretrained("t5-base")
+    # T5_config = T5Config().from_pretrained("t5-base")
+    # model = T5ForConditionalGeneration(config=T5_config)
+    model = T5ForConditionalGeneration.from_pretrained("t5-base")
 
     model = model.to(device)
 
@@ -190,9 +182,7 @@ def fine_tuning():
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=config.LEARNING_RATE)
     
     # Defining the LR scheduler with warm up
-    lr_sch = LinearWarmupRsqrtDecayLR(optimizer, 10000)
-    
-
+    lr_sch = LinearWarmupRsqrtDecayLR(optimizer, 100)
 
     print('Initiating Finetuning for the T5 model on dataset')
 
@@ -206,8 +196,8 @@ def fine_tuning():
     test_loss = []
     metrics = {}
 
-    train_interval = 2500
-    val_interval = 1000
+    train_interval = 100
+    val_interval = 100
 
 
     # Load Saved Model
@@ -217,14 +207,15 @@ def fine_tuning():
         model, optimizer, step, lr_sch = load_checkpoint(config.RESUME_PATH, model, optimizer, lr_sch)
         print("step: ", step)
 
-    val_loader = data_process(config, tokenizer, "val", 20000)
-
+    training_loader = data_process(config, tokenizer, "train", 5000)
+    val_loader = data_process(config, tokenizer, "val", 2000)
+    test_loader = data_process(config, tokenizer, "test", 2000)
 
     print("+++++++++++++++++++++ Fine tuning ++++++++++++++++++++++++")
 
     while step < config.TRAIN_STEPS:
 
-        epoch  == step // len(training_loader)
+        epoch == step // len(training_loader)
 
         for _, data in enumerate(training_loader, 0):
 
@@ -238,22 +229,20 @@ def fine_tuning():
 
             if step % train_interval == 0:
                 print(
-                    f'Steps: {step}, batch: {step}/{config.TRAIN_STEPS}, Loss:  {sum(avg_loss[-interval:]) / interval}, lr: {lr_sch.get_lr()[0]}')
+                    f'Steps: {step}, batch: {step}/{config.TRAIN_STEPS}, Loss:  {sum(avg_loss[-train_interval:]) / train_interval}, lr: {lr_sch.get_lr()[0]}')
                 train_loss_ = sum(avg_loss) / len(avg_loss)
                 train_loss.append(train_loss_)
 
 
             if step % val_interval == 0:
-                _, _, val_loss_ = validate(step, tokenizer, model, device, val_loader, generate=False)
+                _, _, val_loss_ = validate(tokenizer, model, val_loader, generate=False)
                 val_avg_loss = sum(val_loss_) / len(val_loss_)
                 print("Average val loss ", val_avg_loss)
-                save_checkpoint(step, model, optimizer, lr_sch, val_avg_loss, min(val_loss))  # Early stop for best Loss
                 val_loss.append(val_avg_loss)
+                save_checkpoint(step, model, optimizer, lr_sch, val_avg_loss, min(val_loss))  # Early stop for best Loss
 
-    
 
      # Testing
-    test_loader = data_process(config, tokenizer, "test", 20000)
 
     prediction, actual, test_loss = validate(tokenizer, model, test_loader, generate=True)
     rouge = calculate_rouge(prediction, actual)
@@ -270,7 +259,7 @@ def fine_tuning():
         "test_loss" : test_loss,  
         "rouge": rouge, 
         "num_of_epochs": config.TRAIN_EPOCHS,
-        "num_of_steps": steps
+        "num_of_steps": step
     }
 
     saveInfo(Info)
