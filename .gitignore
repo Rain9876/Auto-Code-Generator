@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 data/
 processed_data/
+pretrained_data/
 i
 # C extensions
 *.so
