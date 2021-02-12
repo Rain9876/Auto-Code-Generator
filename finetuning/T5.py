@@ -3,12 +3,13 @@ from transformers import T5Tokenizer, T5ForConditionalGeneration, T5Config
 from Utils import *
 from dataset.Dataset import CSN_Dataset
 import collections
+from apex import amp
 
 set_rand_seeds()
 device = set_device()
 
 
-def training_per_iteration(model, tokenizer, data, optimizer, lr_sch):
+def training_per_iteration(model, tokenizer, data, optimizer, lr_sch, amp):
     optimizer.zero_grad()
 
     y = data['decoder_input_ids'].to(device, dtype=torch.long)
@@ -23,7 +24,10 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch):
 
     loss = outputs[0]
 
-    loss.backward()
+    with amp.scale_loss(loss, optimizer) as scaled_loss:
+        scaled_loss.backward()
+
+    # loss.backward()
 
     optimizer.step()
 
@@ -89,9 +93,9 @@ def validate(tokenizer, model, loader, generate=True, interval = 1000):
 
 
 
-def save_checkpoint(step, model, opt, lr_sch, loss, min_loss, best_model=True, last_model=True, suffix=""):
+def save_checkpoint(step, model, opt, lr_sch, loss, min_loss, amp, best_model=True, last_model=True, suffix=""):
     checkpoint = {'step': step, 'model_state': model.state_dict(), "optimizer_state": opt.state_dict(),
-                  "lr_sch_state": lr_sch.state_dict()}
+                  "lr_sch_state": lr_sch.state_dict(), "amp": amp.state_dict()}
     if last_model:
         model_name = f'last_model{suffix}.ckpt'
         torch.save(checkpoint, model_name)
@@ -105,12 +109,15 @@ def save_checkpoint(step, model, opt, lr_sch, loss, min_loss, best_model=True, l
 
 
 
-def load_checkpoint(PATH, model, opt, lr_sch):    
+def load_checkpoint(PATH, model, opt, lr_sch, opt_level):
     checkpoint = torch.load(PATH)
+
+    model, opt = amp.initialize(model, opt, opt_level=opt_level)
     model.load_state_dict(checkpoint['model_state'])
     opt.load_state_dict(checkpoint['optimizer_state'])
     step = checkpoint['step']+1
     lr_sch = lr_sch.load_state_dict(checkpoint['lr_sch_state'])
+
     return model, opt, step, lr_sch
 
 
@@ -162,7 +169,7 @@ def fine_tuning():
         TRAIN_STEPS = 5000,
         TEST_EPOCHS = 1,
         LEARNING_RATE=1e-5,  # learning rate (default: 0.01)
-        MAX_SRC_LEN=256,
+        MAX_SRC_LEN=512,
         MAX_TGT_LEN=512,
         DATA_DIR = "/home/song/Desktop/Auto-Code-Generator/data_processing/processed_data/finetuning",
         RESUME_PATH = "",
@@ -182,7 +189,7 @@ def fine_tuning():
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=config.LEARNING_RATE)
     
     # Defining the LR scheduler with warm up
-    lr_sch = LinearWarmupRsqrtDecayLR(optimizer, 100)
+    lr_sch = LinearWarmupRsqrtDecayLR(optimizer, 1000)
 
     print('Initiating Finetuning for the T5 model on dataset')
 
@@ -199,12 +206,14 @@ def fine_tuning():
     train_interval = 100
     val_interval = 100
 
+    opt_level = "O1"
+    model, optimizer = amp.initialize(model,optimizer, opt_level=opt_level)
 
     # Load Saved Model
     if config.RESUME:
         print("Load saved model!")
         print("Path: ", config.RESUME_PATH)
-        model, optimizer, step, lr_sch = load_checkpoint(config.RESUME_PATH, model, optimizer, lr_sch)
+        model, optimizer, step, lr_sch = load_checkpoint(config.RESUME_PATH, model, optimizer, lr_sch, opt_level)
         print("step: ", step)
 
     training_loader = data_process(config, tokenizer, "train", 5000)
@@ -215,13 +224,13 @@ def fine_tuning():
 
     while step < config.TRAIN_STEPS:
 
-        epoch == step // len(training_loader)
+        # epoch == step // len(training_loader)
 
         for _, data in enumerate(training_loader, 0):
 
             model.train()
 
-            loss = training_per_iteration(model, tokenizer, data, optimizer, lr_sch)
+            loss = training_per_iteration(model, tokenizer, data, optimizer, lr_sch, amp)
 
             avg_loss.append(loss.item())
 
@@ -239,11 +248,10 @@ def fine_tuning():
                 val_avg_loss = sum(val_loss_) / len(val_loss_)
                 print("Average val loss ", val_avg_loss)
                 val_loss.append(val_avg_loss)
-                save_checkpoint(step, model, optimizer, lr_sch, val_avg_loss, min(val_loss))  # Early stop for best Loss
+                save_checkpoint(step, model, optimizer, lr_sch, val_avg_loss, min(val_loss), amp)  # Early stop for best Loss
 
 
      # Testing
-
     prediction, actual, test_loss = validate(tokenizer, model, test_loader, generate=True)
     rouge = calculate_rouge(prediction, actual)
     metrics["rouge"].append(rouge)
