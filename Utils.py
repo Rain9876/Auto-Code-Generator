@@ -336,3 +336,6 @@ def train_val_split(data_path, val=False, index=1):
     f.writelines(data[:500000]["Text"])
 
     f.close()
+
+
+
