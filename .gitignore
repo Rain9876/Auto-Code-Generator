@@ -6,6 +6,7 @@ data/
 processed_data/
 pretrained_data/
 i
+*.ckpt
 # C extensions
 *.so
 

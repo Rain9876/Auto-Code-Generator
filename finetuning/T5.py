@@ -14,9 +14,15 @@ import collections
 from apex import amp
 from rouge_score import rouge_scorer, scoring
 import numpy as np
+import pandas as pd
+from transformers import (
+    LogitsProcessorList,
+    MinLengthLogitsProcessor,
+)
 
 set_rand_seeds()
-device = set_device()
+device = 1
+torch.cuda.set_device(device)
 scorer = rouge_scorer.RougeScorer(["rouge1", "rougeL"], use_stemmer=True)
 
 
@@ -29,7 +35,9 @@ def reward_bleu(x):
 
 
 def reward_rogue(x, y):
-    scores = scorer.score(x, y)
+    scores = []
+    for x1, y1 in zip(x, y):
+        scores.append(scorer.score(x1, y1))
     return scores
 
 
@@ -41,40 +49,66 @@ def Policy_Gradient_Update(model, tokenizer, data):
     lm_labels[y == tokenizer.pad_token_id] = -100
     ids = data["input_ids"].to(device, dtype=torch.long)
     mask = data["attention_mask"].to(device, dtype=torch.long)
-    ## 1. compute rewards
-    # # outputs = model(input_ids=ids, attention_mask=mask)
-    # # (B,S,V)
-    # # logits = outputs.logits
-    # # output_ids = torch.
 
-    print()
-    outputs = model.generate(ids, max_length=50,)
-    # print("generated outputs:", outputs)
-    out_string = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    y_string = tokenizer.decode(y[0], skip_special_tokens=True)
+    # print("input ids:", tokenizer.batch_decode(ids, skip_special_tokens=True))
+    ## 1. compute rewards
+    # logits_processor = LogitsProcessorList(
+    #     [MinLengthLogitsProcessor(15, eos_token_id=model.config.eos_token_id),]
+    # )
+    # outputs = model.greedy_search(ids, max_length=50, logits_processor=logits_processor)
+    # print("Generated:", tokenizer.batch_decode(outputs, skip_special_tokens=True))
+    # print("--")
+    # print("--")
+    outputs = model.generate(
+        ids,
+        max_length=50,
+        num_beams=1,
+        output_scores=True,
+        return_dict_in_generate=True,
+    )
+    # print("generated outputs:", outputs.sequences)
+
+    out_string = tokenizer.batch_decode(outputs.sequences, skip_special_tokens=True)
+    y_string = tokenizer.batch_decode(y, skip_special_tokens=True)
     print("string:", out_string)
-    # print("y:", y)
-    RC = reward_control_flow(outputs)
-    RS = reward_rogue(out_string, y_string)["rougeL"].fmeasure
+    print("y:", y_string)
+    # print(len(outputs.scores))
+    # print(outputs.scores[0].shape)
+    # RC = reward_control_flow(outputs)
+    RS = [x["rougeL"].fmeasure for x in reward_rogue(out_string, y_string)]
     print("Rogue Score: {}".format(RS))
-    averageRC = np.mean(RC)
+    # averageRC = np.mean(RC)
     averageRS = np.mean(RS)
-    unbiasedRC = RC  # - averageRC
+    # unbiasedRC = RC  # - averageRC
     unbiasedRS = RS  # - averageRS
     # might have to split these 2 rewards into 2 policy updates.
-    total_rewards = torch.tensor(unbiasedRC + unbiasedRS, dtype=torch.float).to(device)
-    ## 2 compute log p(x_t|x_<t), the label doesn't actually matter ?
-    outputs = model(input_ids=ids, attention_mask=mask, labels=lm_labels)
-    # (B,S,V)
-    lm_logits = outputs.logits
+    total_rewards = torch.tensor(unbiasedRS, dtype=torch.float).to(device)
+
+    ## 2 compute log p(x_t|x_<t), the label doesn't actually matter ? WRONG code
+    # outputs2 = model(input_ids=ids, attention_mask=mask, labels=lm_labels)
+    # lm_logits = outputs2.logits
+    # loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="none")
+    # loss = loss_fct(lm_logits, lm_labels)
     # print(lm_logits.shape)
-    loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="none")
-    loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), lm_labels.view(-1))
-    # print(f"loss:{loss.shape}")
+    # print(lm_logits.view(-1, lm_logits.size(-1)).shape)
+
+    # more accurate algorithmicly
+    loss = []
+    loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="mean")
+    for i in range(batch_size):
+        generated_output = []
+        for j in range(len(outputs.scores)):
+            generated_output.append(outputs.scores[j][i])
+        generated_output = torch.stack(generated_output, dim=0)
+        episode_loss = loss_fct(generated_output, outputs.sequences[i][1:])
+        loss.append(episode_loss)
+    loss = torch.stack(loss, dim=0)
+    print(f"loss:{loss}")
     # print(total_rewards)
     # (B,1)
-    summed_loss = torch.sum(loss, dim=0) * 1 / T
-    weighted_loss = torch.dot(total_rewards.unsqueeze(0), summed_loss.unsqueeze(0))
+    # summed_loss = torch.sum(loss, dim=0) * 1 / T
+    print(total_rewards.shape, loss.shape)
+    weighted_loss = torch.dot(total_rewards.squeeze(0), loss.squeeze(0))
 
     ## 3 Loss
     L = 1 / batch_size * (weighted_loss)
@@ -106,7 +140,7 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch, pg, amp):
         scaled_loss.backward()
 
     # loss.backward()
-
+    # print(torch.cuda.memory_summary(device=1, abbreviated=True))
     optimizer.step()
 
     lr_sch.step()
@@ -191,6 +225,7 @@ def save_checkpoint(
     loss,
     min_loss,
     amp,
+    pg,
     best_model=True,
     last_model=True,
     suffix="",
@@ -202,7 +237,10 @@ def save_checkpoint(
         "lr_sch_state": lr_sch.state_dict(),
         "amp": amp.state_dict(),
     }
-    folder = "pg/"
+    if pg:
+        folder = "pg/"
+    else:
+        folder = "base/"
     if last_model:
         model_name = folder + f"last_model{suffix}.ckpt"
         torch.save(checkpoint, model_name)
@@ -287,7 +325,7 @@ def fine_tuning():
     )
 
     config = param(
-        TRAIN_BATCH_SIZE=1,  # input batch size for training_loader
+        TRAIN_BATCH_SIZE=2,  # input batch size for training_loader
         VALID_BATCH_SIZE=4,  # input batch size for testing
         TEST_BATCH_SIZE=4,  # input batch size for testing
         TRAIN_EPOCHS=100,  # number of epochs to train
@@ -333,7 +371,7 @@ def fine_tuning():
 
     opt_level = "O1"
     model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
-
+    model.to(device)
     # Load Saved Model
     if config.RESUME:
         print("Load saved model!")
@@ -378,7 +416,14 @@ def fine_tuning():
                 print("Average val loss ", val_avg_loss)
                 val_loss.append(val_avg_loss)
                 save_checkpoint(
-                    step, model, optimizer, lr_sch, val_avg_loss, min(val_loss), amp
+                    step,
+                    model,
+                    optimizer,
+                    lr_sch,
+                    val_avg_loss,
+                    min(val_loss),
+                    amp,
+                    config.POLICY_GRADIENT,
                 )  # Early stop for best Loss
 
     # Testing
