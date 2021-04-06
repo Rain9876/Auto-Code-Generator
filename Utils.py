@@ -18,7 +18,7 @@ def set_device():
         print('Allocated:', round(torch.cuda.memory_allocated(0) / 1024 ** 3, 1), 'GB')
         print('Cached:   ', round(torch.cuda.memory_cached(0) / 1024 ** 3, 1), 'GB')
     else:
-        print("Use GPU: " + use_GPU)
+        print("Use GPU: " + str(use_GPU))
     return device
 
 
@@ -161,181 +161,181 @@ class LinearWarmupRsqrtDecayLR(LRSchedular):
 ######################################################################################
 
 
-def map_ontology_to_tokens(tokens, ids):
-    if "[]" in ids:
-        return []
+# def map_ontology_to_tokens(tokens, ids):
+#     if "[]" in ids:
+#         return []
 
-    ids = re.findall("\d+", ids)
-    num = 0
-    idx = 0
-    target_token = []
-    for i in range(len(tokens)):
-        token = tokens[i]
-        num += len(token)
-        if "<s>" in token:
-            num -= 3
-        if "</s>" in token:
-            num -= 4
-        if token.startswith("_"):
-            num -= 1
-        if num > int(ids[idx]):
-            target_token.append(i)
-            idx += 1
-        if idx == len(ids):
-            break
-    return target_token
-
-
-def compute_length_prob(p=0.2, min_length=1, max_length=10):
-    q = 1 - p
-    length = max_length - min_length + 1
-
-    # Normalized
-    pb = [(p / (1 - q ** length)) * (q ** i) for i in range(min_length - 1, max_length)]
-
-    # average_length
-    avg_len = sum([pb[i] * (min_length + i) for i in range(length)])
-
-    print("Average span length: ", avg_len)
-
-    return pb, avg_len
+#     ids = re.findall("\d+", ids)
+#     num = 0
+#     idx = 0
+#     target_token = []
+#     for i in range(len(tokens)):
+#         token = tokens[i]
+#         num += len(token)
+#         if "<s>" in token:
+#             num -= 3
+#         if "</s>" in token:
+#             num -= 4
+#         if token.startswith("_"):
+#             num -= 1
+#         if num > int(ids[idx]):
+#             target_token.append(i)
+#             idx += 1
+#         if idx == len(ids):
+#             break
+#     return target_token
 
 
-def masking(text, idx, num_of_spans):
-    text_idx = list(range(len(text)))
-    num_of_ontol = len(idx)
+# def compute_length_prob(p=0.2, min_length=1, max_length=10):
+#     q = 1 - p
+#     length = max_length - min_length + 1
 
-    if num_of_ontol >= num_of_spans:
-        # select number of spans
-        selection = np.sort(np.random.choice(idx, size=num_of_spans, replace=False))
-    else:
-        # select all ontologies and randomly select other tokens
-        list_left = np.setdiff1d(text_idx, idx)
-        select_left = np.random.choice(list_left, size=num_of_spans - num_of_ontol, replace=False)
-        selection = np.sort(np.concatenate([np.array(idx), select_left])).astype(int)
+#     # Normalized
+#     pb = [(p / (1 - q ** length)) * (q ** i) for i in range(min_length - 1, max_length)]
 
-    return selection
+#     # average_length
+#     avg_len = sum([pb[i] * (min_length + i) for i in range(length)])
 
+#     print("Average span length: ", avg_len)
 
-def span_masking(text, idx, span_length):
-    span = [span_length] * len(idx)
-
-    mask = np.ones(len(text), dtype=bool)
-
-    for i, k in zip(idx, span):
-        end = i + k
-        begin = i
-
-        if end > len(text) - 1:
-            end = len(text) - 1
-
-        if begin < 0:
-            begin = 0
-
-        # Check the fragment ends with whole word
-        # for j in range(span_length):
-        while not is_end_with_whole_word(text, end):
-            end += 1
-
-        # Check the fragment starts with whole word
-        while not is_begin_with_whole_word(text, begin):
-            begin -= 1
-
-        mask[begin: end] = False
-
-    return mask
+#     return pb, avg_len
 
 
-def is_end_with_whole_word(text, end):
-    # For 3 words
-    # if end < len(text)-1 and not text[end+1].startswith("▁"):
-    if end < len(text) - 1 and not text[end].startswith("▁"):
-        return False
-    return True
+# def masking(text, idx, num_of_spans):
+#     text_idx = list(range(len(text)))
+#     num_of_ontol = len(idx)
+
+#     if num_of_ontol >= num_of_spans:
+#         # select number of spans
+#         selection = np.sort(np.random.choice(idx, size=num_of_spans, replace=False))
+#     else:
+#         # select all ontologies and randomly select other tokens
+#         list_left = np.setdiff1d(text_idx, idx)
+#         select_left = np.random.choice(list_left, size=num_of_spans - num_of_ontol, replace=False)
+#         selection = np.sort(np.concatenate([np.array(idx), select_left])).astype(int)
+
+#     return selection
 
 
-def is_begin_with_whole_word(text, begin):
-    if begin > 0 and not text[begin].startswith("▁"):
-        return False
-    return True
+# def span_masking(text, idx, span_length):
+#     span = [span_length] * len(idx)
+
+#     mask = np.ones(len(text), dtype=bool)
+
+#     for i, k in zip(idx, span):
+#         end = i + k
+#         begin = i
+
+#         if end > len(text) - 1:
+#             end = len(text) - 1
+
+#         if begin < 0:
+#             begin = 0
+
+#         # Check the fragment ends with whole word
+#         # for j in range(span_length):
+#         while not is_end_with_whole_word(text, end):
+#             end += 1
+
+#         # Check the fragment starts with whole word
+#         while not is_begin_with_whole_word(text, begin):
+#             begin -= 1
+
+#         mask[begin: end] = False
+
+#     return mask
 
 
-sentinel = "<extra_id_"
+# def is_end_with_whole_word(text, end):
+#     # For 3 words
+#     # if end < len(text)-1 and not text[end+1].startswith("▁"):
+#     if end < len(text) - 1 and not text[end].startswith("▁"):
+#         return False
+#     return True
 
 
-def replace_with_sentinel(text, mask):
-    index = 0
-    in_span = False
-    fragment = []
-
-    for x, y in zip(text, mask):
-        if y == True:
-            fragment.append(x)
-            in_span = False
-        elif not in_span:
-            fragment.append(f"{sentinel}{index}>")
-            in_span = True
-            index += 1
-
-    # No bos for T5, but need eos
-    fragment.append("</s>")
-    return fragment
+# def is_begin_with_whole_word(text, begin):
+#     if begin > 0 and not text[begin].startswith("▁"):
+#         return False
+#     return True
 
 
-def pretrained_data_preprocess(tok, csv_path, end):
-    data = pd.read_csv(csv_path)
-
-    if end:
-        data = data.iloc[:end]
-
-    encode_inputs = []
-    decode_inputs = []
-
-    avg_length = 3
-    mask_prob = 0.15
-
-    start = time.time()
-
-    for text, ontol in zip(data["Text"], data["Ontol"]):
-        # Tokens
-        tokens = tok.tokenize(text)
-
-        num_of_span = math.floor((len(tokens) * mask_prob) / avg_length)
-
-        ontol_idx = map_ontology_to_tokens(tokens, ontol)
-
-        # The tokens need to be masked
-        ontol_token_idx = masking(tokens, ontol_idx, num_of_span)
-        # span mask for each text tokens
-        mask = span_masking(tokens, ontol_token_idx, avg_length)
-
-        encode_inputs.append(replace_with_sentinel(tokens, mask))
-        decode_inputs.append(replace_with_sentinel(tokens, ~mask))
-
-    print("Processing time: {:.3f}".format(time.time() - start))
-
-    return encode_inputs, decode_inputs
+# sentinel = "<extra_id_"
 
 
-def train_val_split(data_path, val=False, index=1):
-    data = pd.read_csv(f"{data_path}/pretraining{index}.csv")
-    print(data.head())
+# def replace_with_sentinel(text, mask):
+#     index = 0
+#     in_span = False
+#     fragment = []
 
-    # A txt file to sentence piece training
-    f = open(data_path + "/train_spm.txt", "a+")
+#     for x, y in zip(text, mask):
+#         if y == True:
+#             fragment.append(x)
+#             in_span = False
+#         elif not in_span:
+#             fragment.append(f"{sentinel}{index}>")
+#             in_span = True
+#             index += 1
 
-    # Shuffling
-    data = data.sample(frac=1, replace=False)
+#     # No bos for T5, but need eos
+#     fragment.append("</s>")
+#     return fragment
 
-    data[:250000].to_csv(f"{data_path}/pretrain_train{index * 2 - 1}.csv", index=False)
-    data[250000:500000].to_csv(f"{data_path}/pretrain_train{index * 2}.csv", index=False)
 
-    if val:
-        data[500000:].to_csv(f"{data_path}/pretrain_val.csv", index=False)
+# def pretrained_data_preprocess(tok, csv_path, end):
+#     data = pd.read_csv(csv_path)
 
-    f.writelines(data[:500000]["Text"])
+#     if end:
+#         data = data.iloc[:end]
 
-    f.close()
+#     encode_inputs = []
+#     decode_inputs = []
+
+#     avg_length = 3
+#     mask_prob = 0.15
+
+#     start = time.time()
+
+#     for text, ontol in zip(data["Text"], data["Ontol"]):
+#         # Tokens
+#         tokens = tok.tokenize(text)
+
+#         num_of_span = math.floor((len(tokens) * mask_prob) / avg_length)
+
+#         ontol_idx = map_ontology_to_tokens(tokens, ontol)
+
+#         # The tokens need to be masked
+#         ontol_token_idx = masking(tokens, ontol_idx, num_of_span)
+#         # span mask for each text tokens
+#         mask = span_masking(tokens, ontol_token_idx, avg_length)
+
+#         encode_inputs.append(replace_with_sentinel(tokens, mask))
+#         decode_inputs.append(replace_with_sentinel(tokens, ~mask))
+
+#     print("Processing time: {:.3f}".format(time.time() - start))
+
+#     return encode_inputs, decode_inputs
+
+
+# def train_val_split(data_path, val=False, index=1):
+#     data = pd.read_csv(f"{data_path}/pretraining{index}.csv")
+#     print(data.head())
+
+#     # A txt file to sentence piece training
+#     f = open(data_path + "/train_spm.txt", "a+")
+
+#     # Shuffling
+#     data = data.sample(frac=1, replace=False)
+
+#     data[:250000].to_csv(f"{data_path}/pretrain_train{index * 2 - 1}.csv", index=False)
+#     data[250000:500000].to_csv(f"{data_path}/pretrain_train{index * 2}.csv", index=False)
+
+#     if val:
+#         data[500000:].to_csv(f"{data_path}/pretrain_val.csv", index=False)
+
+#     f.writelines(data[:500000]["Text"])
+
+#     f.close()
 
 
 

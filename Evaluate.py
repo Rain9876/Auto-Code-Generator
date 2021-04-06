@@ -34,9 +34,10 @@ def RL_of_loss(model, x_in, y, mask, loss, tokenizer):
             early_stopping=True
         )
 
-        preds = [tokenizer.decode(g) for g in generated_ids]
+        # preds = [tokenizer.decode(g) for g in generated_ids]
+        preds = tokenizer.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
 
-        target = [tokenizer.decode(t) for t in y]
+        target = tokenizer.batch_decode(y, skip_special_tokens=True, clean_up_tokenization_spaces=True)
 
     # print(preds)
 
@@ -46,7 +47,7 @@ def RL_of_loss(model, x_in, y, mask, loss, tokenizer):
 
     # Todo: Consider about this again
 
-    null_loss = (1/3)*(w1 * (1*bz - np.sum(score1)) + w2 * (1*bz - np.sum(score2)) + loss.item())
+    null_loss = w1 * (1 - np.mean(score1)) + w2 * (1 - np.mean(score2)) + loss.item()
 
     # print("*******"*10)
     # print(bz)
@@ -176,8 +177,8 @@ def recover_back(code):
     '''
         The special tokens of output code need to be replaced.
     '''
-    code = re.sub("§", "    ", code)
-    code = re.sub("ø", "\n", code)
+    code = re.sub(r"\s?ø\s?","\n", code)
+    code = re.sub(r"§\s?","    ", code)
     return code
 
 

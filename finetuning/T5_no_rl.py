@@ -5,7 +5,7 @@ from dataset.Dataset import CSN_Dataset
 import keyword
 import collections
 #from apex import amp
-from Evaluate import RL_of_loss
+# from Evaluate import RL_of_loss
 
 set_rand_seeds()
 device = set_device()
@@ -34,7 +34,7 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch, amp):
 
     # print(ids)
 
-    loss = RL_of_loss(model, ids, y, mask, loss, tokenizer)
+    # loss = RL_of_loss(model, ids, y, mask, loss, tokenizer)
 
     #with amp.scale_loss(loss, optimizer) as scaled_loss:
     #    scaled_loss.backward()
@@ -48,7 +48,7 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch, amp):
     return loss
 
 
-def validate(tokenizer, model, loader, generate=True, interval=500):
+def validate(tokenizer, model, loader, generate=True, interval=1000):
     model.eval()
     val_loss = []
     predictions = []
@@ -173,7 +173,7 @@ def load_training_data_portion(config, tokenizer, current_portion, section=6):
 
     k = current_portion % section
 
-    training_loader = data_process(config, tokenizer, "train", start_idx = 80000 * k, end_idx = 80000 * (k + 1))
+    training_loader = data_process(config, tokenizer, "train", start_idx=80000 * k, end_idx=80000 * (k + 1))
 
     print("Load Data Portion: ", current_portion % section)
 
@@ -192,7 +192,7 @@ def fine_tuning():
         VALID_BATCH_SIZE=16,  # input batch size for testing
         TEST_BATCH_SIZE=16,  # input batch size for testing
         TRAIN_EPOCHS=2,  # number of epochs to train
-        TRAIN_STEPS=75000,
+        TRAIN_STEPS=50000,
         TEST_EPOCHS=1,
         LEARNING_RATE=1e-5,  # learning rate (default: 0.01)
         MAX_SRC_LEN=512,
@@ -205,7 +205,7 @@ def fine_tuning():
 
     # tokenzier for encoding the text
     tokenizer = T5Tokenizer.from_pretrained("t5-base")
-    tokenizer.add_tokens(keyword.kwlist)
+    # tokenizer.add_tokens(keyword.kwlist)
     tokenizer.add_tokens(["§", "ø"])
 
     # T5_config = T5Config().from_pretrained("t5-base")

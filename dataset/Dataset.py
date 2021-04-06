@@ -2,8 +2,6 @@ import torch
 from torch.utils.data import Dataset
 import pandas as pd
 from pathlib import Path
-from Utils import pretrained_data_preprocess
-import gc
 
 T5_PREFIX = "translate NL to Python: "
 
@@ -36,8 +34,8 @@ def encode_CSN_file(
         data_type="",
         prefix=T5_PREFIX):
 
-    cache_path_src = Path(f"{data_path}_{data_type}_src.pt")
-    cache_path_tgt = Path(f"{data_path}_{data_type}_tgt.pt")
+    cache_path_src = Path(f"{data_path}/{data_type}_src.pt")
+    cache_path_tgt = Path(f"{data_path}/{data_type}_tgt.pt")
 
     if not overwrite_cache and cache_path_tgt.exists() and cache_path_src.exists():
 
