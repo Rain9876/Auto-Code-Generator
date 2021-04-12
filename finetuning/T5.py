@@ -19,6 +19,9 @@ from transformers import (
     LogitsProcessorList,
     MinLengthLogitsProcessor,
 )
+import nltk
+from pathlib import Path
+from Logic_Eval import logic_evaluate
 
 set_rand_seeds()
 device = 1
@@ -39,6 +42,23 @@ def reward_rogue(x, y):
     for x1, y1 in zip(x, y):
         scores.append(scorer.score(x1, y1))
     return scores
+
+
+def reward_bleu(x, y):
+    scores = []
+    for x1, y1 in zip(x, y):
+        x1 = x1.split()
+        y1 = y1.split()
+        BLEUscore = nltk.translate.bleu_score.sentence_bleu(
+            [y1], x1, weights=(0.25, 0.25)
+        )
+        scores.append(BLEUscore)
+    return scores
+
+
+def calculate_bleu(xs, ys):
+    BLEUscore = nltk.translate.bleu_score.sentence_bleu(xs, ys)
+    return BLEUscore
 
 
 def Policy_Gradient_Update(model, tokenizer, data):
@@ -74,9 +94,14 @@ def Policy_Gradient_Update(model, tokenizer, data):
     print("y:", y_string)
     # print(len(outputs.scores))
     # print(outputs.scores[0].shape)
-    # RC = reward_control_flow(outputs)
-    RS = [x["rougeL"].fmeasure for x in reward_rogue(out_string, y_string)]
-    print("Rogue Score: {}".format(RS))
+    # RS = [x["rougeL"].fmeasure for x in reward_rogue(out_string, y_string)]
+    # print("Rogue Score: {}".format(RS))
+    # RS = [x for x in reward_bleu(out_string, y_string)]
+    RC = logic_evaluate(out_string, y_string)
+    # print("Bleu Score: {}".format(RS))
+    RS = RC
+    print("Logic Score: {}".format(RC))
+
     # averageRC = np.mean(RC)
     averageRS = np.mean(RS)
     # unbiasedRC = RC  # - averageRC
@@ -148,7 +173,7 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch, pg, amp):
     return loss
 
 
-def validate(tokenizer, model, loader, generate=True, interval=1000):
+def validate(tokenizer, model, loader, generate=True,generate_method="greedy", interval=1000):
 
     model.eval()
     val_loss = []
@@ -178,13 +203,23 @@ def validate(tokenizer, model, loader, generate=True, interval=1000):
 
             if generate:
                 t0 = time.time()
-                generated_ids = model.generate(
-                    input_ids=ids,
-                    attention_mask=mask,
-                    max_length=300,
-                    num_beams=4,
-                    early_stopping=True,
-                )
+                if generate_method=="greedy":
+                    generated_ids = model.generate(
+                        input_ids=ids,
+                        attention_mask=mask,
+                        max_length=300,
+                        num_beams=4,
+                        early_stopping=True,
+                    )
+                elif generate_method == "nucleus":
+                    generated_ids = model.generate(
+                        input_ids=ids,
+                        attention_mask=mask,
+                        max_length=300,
+                        num_beams=4,
+                        early_stopping=True,
+                        do_sample=True, top_p=0.92
+                    )
 
                 preds = [
                     tokenizer.decode(
@@ -226,6 +261,7 @@ def save_checkpoint(
     min_loss,
     amp,
     pg,
+    config,
     best_model=True,
     last_model=True,
     suffix="",
@@ -237,10 +273,8 @@ def save_checkpoint(
         "lr_sch_state": lr_sch.state_dict(),
         "amp": amp.state_dict(),
     }
-    if pg:
-        folder = "pg/"
-    else:
-        folder = "base/"
+    folder = str(Path(config.RESUME_PATH).parent)
+
     if last_model:
         model_name = folder + f"last_model{suffix}.ckpt"
         torch.save(checkpoint, model_name)
@@ -303,6 +337,23 @@ def data_process(config, tokenizer, data_type, data_size):
     return data_loader
 
 
+def produce_predictions(config, model,tokenizer,test_loader,folder, method,file_name):
+    prediction, actual, test_loss = validate(
+        tokenizer, model, test_loader, generate=True,generate_method=method
+    )
+    # rouge = calculate_rouge(prediction, actual)
+    # bleu = calculate_bleu(prediction, actual)
+    # # bleu =
+    # # metrics["rouge"].append(rouge)
+    # print("Rouge score", rouge)
+    # print("Bleu score", bleu)
+
+    final_df = pd.DataFrame({"Generated Code": prediction, "Actual Code": actual})
+    folder = str(Path(config.RESUME_PATH).parent)
+    final_df.to_csv("./" + folder + file_name)
+    return (prediction,)
+
+
 def fine_tuning():
 
     param = collections.namedtuple(
@@ -335,7 +386,9 @@ def fine_tuning():
         MAX_SRC_LEN=512,
         MAX_TGT_LEN=512,
         DATA_DIR="/home/junliw/CodeGeneration/Auto-Code-Generator/data_processing/processed_data/finetuning",
-        RESUME_PATH="",
+
+        # RESUME_PATH="/home/junliw/CodeGeneration/Auto-Code-Generator/finetuning/pg/last_model.ckpt",
+        RESUME_PATH="/home/junliw/CodeGeneration/Auto-Code-Generator/finetuning/pg_logic/pg_bleubest_model_loss.ckpt",
         RESUME=False,
         POLICY_GRADIENT=True,
     )
@@ -370,8 +423,6 @@ def fine_tuning():
     val_interval = 100
 
     opt_level = "O1"
-    model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
-    model.to(device)
     # Load Saved Model
     if config.RESUME:
         print("Load saved model!")
@@ -379,11 +430,20 @@ def fine_tuning():
         model, optimizer, step, lr_sch = load_checkpoint(
             config.RESUME_PATH, model, optimizer, lr_sch, opt_level
         )
+        step = 5000
         print("step: ", step)
+    else:
+        model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
+    model.to(device)
 
     training_loader = data_process(config, tokenizer, "train", 5000)
     val_loader = data_process(config, tokenizer, "val", 2000)
     test_loader = data_process(config, tokenizer, "test", 2000)
+
+    folder = str(Path(config.RESUME_PATH).parent)
+    Path(folder).mkdir(parents=True, exist_ok=True)
+
+    prediction, actual = produce_predictions(config,model,tokenizer,test_loader,folder,"greedy","before_train_prediction.csv")
 
     print("+++++++++++++++++++++ Fine tuning ++++++++++++++++++++++++")
 
@@ -424,17 +484,18 @@ def fine_tuning():
                     min(val_loss),
                     amp,
                     config.POLICY_GRADIENT,
+                    config,
                 )  # Early stop for best Loss
 
     # Testing
-    prediction, actual, test_loss = validate(
-        tokenizer, model, test_loader, generate=True
-    )
+    print("final validation...")
+    prediction, actual = produce_predictions(config,model,tokenizer,test_loader,folder,"greedy","prediction.csv")
     rouge = calculate_rouge(prediction, actual)
-    metrics["rouge"].append(rouge)
+    bleu = calculate_bleu(prediction, actual)
+    # bleu =
+    # metrics["rouge"].append(rouge)
     print("Rouge score", rouge)
-    final_df = pd.DataFrame({"Generated Code": prediction, "Actual Code": actual})
-    final_df.to_csv("./predictions.csv")
+    print("Bleu score", bleu)
     print("Output Files generated for review")
 
     Info = {
