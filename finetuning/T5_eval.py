@@ -28,13 +28,13 @@ def training_per_iteration(model, tokenizer, data, optimizer, lr_sch, amp):
 
     loss = outputs[0]
 
-    #source_ids, source_mask, _ = CSN_Dataset.trim_seq2seq_batch(data, tokenizer.pad_token_id)
-    #ids = source_ids.to(device)
-    #mask = source_mask.to(device)
+    source_ids, source_mask, _ = CSN_Dataset.trim_seq2seq_batch(data, tokenizer.pad_token_id)
+    ids = source_ids.to(device)
+    mask = source_mask.to(device)
 
     # print(ids)
 
-    #loss = RL_of_loss(model, ids, y, mask, loss, tokenizer)
+    loss = RL_of_loss(model, ids, y, mask, loss, tokenizer)
 
     #with amp.scale_loss(loss, optimizer) as scaled_loss:
     #    scaled_loss.backward()
@@ -106,9 +106,6 @@ def validate(tokenizer, model, loader, generate=True, interval=500):
 def save_checkpoint(step, model, opt, lr_sch, loss, min_loss, amp, data_portion, save_path, best_model=True, last_model=True, suffix=""):
     checkpoint = {'step': step, 'model_state': model.state_dict(), "optimizer_state": opt.state_dict(),
             "lr_sch_state": lr_sch.state_dict(), "amp": amp, "data_portion": data_portion}
-    
-    print(lr_sch.state_dict()==None)
-
     if last_model:
         model_name = f'{save_path}last_model{suffix}.ckpt'
         torch.save(checkpoint, model_name)
@@ -129,13 +126,8 @@ def load_checkpoint(PATH, model, opt, lr_sch):
     opt.load_state_dict(checkpoint['optimizer_state'])
     step = checkpoint['step']
     lr_sch = lr_sch.load_state_dict(checkpoint['lr_sch_state'])
-    data_portion = checkpoint["data_portion"]
-    print(opt == None)
-    print(model == None)
-    print(step)
-    print(lr_sch)
-
-    return model, opt, step, lr_sch, data_portion
+    # data_portion = checkpoint["data_portion"]
+    return model, opt, step, lr_sch
 
 
 def data_process(config, tokenizer, data_type, start_idx, end_idx):
@@ -208,7 +200,7 @@ def fine_tuning():
         DATA_DIR="/home/yurun/Documents/AutoCodeGeneration/data/finetuning/",
         RESUME_PATH="/home/yurun/Documents/AutoCodeGeneration/output/best_model_loss.ckpt",
         SAVE_PATH = "/home/yurun/Documents/AutoCodeGeneration/output/",
-        RESUME=False
+        RESUME=True
     )
 
     # tokenzier for encoding the text
@@ -251,7 +243,7 @@ def fine_tuning():
     if config.RESUME:
         print("Load saved model!")
         print("Path: ", config.RESUME_PATH)
-        model, optimizer, step, lr_sch, data_portion = load_checkpoint(config.RESUME_PATH, model, optimizer, lr_sch)
+        model, optimizer, step, lr_sch = load_checkpoint(config.RESUME_PATH, model, optimizer, lr_sch)
         print("step: ", step)
 
     # Load 2000 validation data, 23108 in total.
@@ -262,35 +254,35 @@ def fine_tuning():
     # training_loader = load_training_data_portion(config, tokenizer, data_portion)
     # test_loader = data_process(config, tokenizer, "test", 0, 30000)
     
-    while step < config.TRAIN_STEPS:
+    #while step < config.TRAIN_STEPS:
 
         # Load portion of processed data
-        training_loader = load_training_data_portion(config, tokenizer, data_portion)
+    #    training_loader = load_training_data_portion(config, tokenizer, data_portion)
         
-        data_portion += 1
-        epoch = data_portion // 2
+    #    data_portion += 1
+    #    epoch = data_portion // 2
 
-        for _, data in enumerate(training_loader, 0):
+    #    for _, data in enumerate(training_loader, 0):
 
-            loss = training_per_iteration(model, tokenizer, data, optimizer, lr_sch, amp)
+    #        loss = training_per_iteration(model, tokenizer, data, optimizer, lr_sch, amp)
 
-            avg_loss.append(loss.item())
+    #        avg_loss.append(loss.item())
 
-            step += 1
+    #        step += 1
 
-            if step % train_interval == 0:
-                print(
-                    f'Steps: {step}, batch: {step}/{config.TRAIN_STEPS}, Loss:  {sum(avg_loss[-train_interval:]) / train_interval}, lr: {lr_sch.get_lr()[0]}')
-                train_loss_ = sum(avg_loss) / len(avg_loss)
-                train_loss.append(train_loss_)
+    #        if step % train_interval == 0:
+    #            print(
+    #                f'Steps: {step}, batch: {step}/{config.TRAIN_STEPS}, Loss:  {sum(avg_loss[-train_interval:]) / train_interval}, lr: {lr_sch.get_lr()[0]}')
+    #            train_loss_ = sum(avg_loss) / len(avg_loss)
+    #            train_loss.append(train_loss_)
 
-            if step % val_interval == 0:
-                _, _, val_loss_ = validate(tokenizer, model, val_loader, generate=False)
-                val_avg_loss = sum(val_loss_) / len(val_loss_)
-                print("Average val loss ", val_avg_loss)
-                val_loss.append(val_avg_loss)
-                save_checkpoint(step, model, optimizer, lr_sch, val_avg_loss, min(val_loss),
-                                amp, data_portion, config.SAVE_PATH)  # Early stop for best Loss
+    #        if step % val_interval == 0:
+    #            _, _, val_loss_ = validate(tokenizer, model, val_loader, generate=False)
+    #            val_avg_loss = sum(val_loss_) / len(val_loss_)
+    #            print("Average val loss ", val_avg_loss)
+    #            val_loss.append(val_avg_loss)
+    #            save_checkpoint(step, model, optimizer, lr_sch, val_avg_loss, min(val_loss),
+    #                            amp, data_portion, config.SAVE_PATH)  # Early stop for best Loss
 
     #  Testing
 

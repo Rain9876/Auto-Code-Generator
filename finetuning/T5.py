@@ -78,7 +78,7 @@ def validate(tokenizer, model, loader, generate=True, interval=500):
                 generated_ids = model.generate(
                     input_ids=ids,
                     attention_mask=mask,
-                    num_beams=1,
+                    num_beams=2,
                     early_stopping=True
                 )
 
@@ -103,9 +103,9 @@ def validate(tokenizer, model, loader, generate=True, interval=500):
     return predictions, actuals, val_loss
 
 
-def save_checkpoint(step, model, opt, lr_sch, loss, min_loss, amp, save_path, best_model=True, last_model=True, suffix=""):
+def save_checkpoint(step, model, opt, lr_sch, loss, min_loss, amp, data_portion, save_path, best_model=True, last_model=True, suffix=""):
     checkpoint = {'step': step, 'model_state': model.state_dict(), "optimizer_state": opt.state_dict(),
-                  "lr_sch_state": lr_sch.state_dict(), "amp": amp}
+            "lr_sch_state": lr_sch.state_dict(), "amp": amp, "data_portion": data_portion}
     if last_model:
         model_name = f'{save_path}last_model{suffix}.ckpt'
         torch.save(checkpoint, model_name)
@@ -124,10 +124,10 @@ def load_checkpoint(PATH, model, opt, lr_sch):
     # model, opt = amp.initialize(model, opt, opt_level=opt_level)
     model.load_state_dict(checkpoint['model_state'])
     opt.load_state_dict(checkpoint['optimizer_state'])
-    step = checkpoint['step'] + 1
+    step = checkpoint['step']
     lr_sch = lr_sch.load_state_dict(checkpoint['lr_sch_state'])
-
-    return model, opt, step, lr_sch
+    data_portion = checkpoint["data_portion"]
+    return model, opt, step, lr_sch, data_portion
 
 
 def data_process(config, tokenizer, data_type, start_idx, end_idx):
@@ -192,9 +192,9 @@ def fine_tuning():
         VALID_BATCH_SIZE=16,  # input batch size for testing
         TEST_BATCH_SIZE=16,  # input batch size for testing
         TRAIN_EPOCHS=2,  # number of epochs to train
-        TRAIN_STEPS=75000,
+        TRAIN_STEPS=50000,
         TEST_EPOCHS=1,
-        LEARNING_RATE=1e-5,  # learning rate (default: 0.01)
+        LEARNING_RATE=1e-3,  # learning rate (default: 0.01)
         MAX_SRC_LEN=512,
         MAX_TGT_LEN=512,
         DATA_DIR="/home/yurun/Documents/AutoCodeGeneration/data/finetuning/",
@@ -218,7 +218,7 @@ def fine_tuning():
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=config.LEARNING_RATE)
 
     # Defining the LR scheduler with warm up
-    lr_sch = LinearWarmupRsqrtDecayLR(optimizer, 2000)
+    lr_sch = LinearWarmupRsqrtDecayLR(optimizer, 5000)
 
     print('Initiating Finetuning for the T5 model on dataset')
 
@@ -243,7 +243,7 @@ def fine_tuning():
     if config.RESUME:
         print("Load saved model!")
         print("Path: ", config.RESUME_PATH)
-        model, optimizer, step, lr_sch = load_checkpoint(config.RESUME_PATH, model, optimizer, lr_sch)
+        model, optimizer, step, lr_sch, data_portion = load_checkpoint(config.RESUME_PATH, model, optimizer, lr_sch)
         print("step: ", step)
 
     # Load 2000 validation data, 23108 in total.
@@ -282,7 +282,7 @@ def fine_tuning():
                 print("Average val loss ", val_avg_loss)
                 val_loss.append(val_avg_loss)
                 save_checkpoint(step, model, optimizer, lr_sch, val_avg_loss, min(val_loss),
-                                amp, config.SAVE_PATH)  # Early stop for best Loss
+                                amp, data_portion, config.SAVE_PATH)  # Early stop for best Loss
 
     #  Testing
 

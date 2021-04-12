@@ -30,7 +30,7 @@ def RL_of_loss(model, x_in, y, mask, loss, tokenizer):
         generated_ids = model.generate(
             input_ids=x_in,
             attention_mask=mask,
-            num_beams=1,
+            num_beams=2,
             early_stopping=True
         )
 
@@ -53,8 +53,8 @@ def RL_of_loss(model, x_in, y, mask, loss, tokenizer):
     # print(bz)
     # print(score2)
     # print(score1)
-    # print(loss.item())
-    # print(null_loss)
+    print(loss.item())
+    print(null_loss)
     # print("*******"*10)
 
     loss_null = torch.tensor(null_loss).to(device=device)
