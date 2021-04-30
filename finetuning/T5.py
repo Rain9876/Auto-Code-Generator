@@ -125,7 +125,10 @@ def load_checkpoint(PATH, model, opt, lr_sch):
     model.load_state_dict(checkpoint['model_state'])
     opt.load_state_dict(checkpoint['optimizer_state'])
     step = checkpoint['step']
-    lr_sch = lr_sch.load_state_dict(checkpoint['lr_sch_state'])
+    lr_sch.optimizer = opt
+    lr_sch.lrs = checkpoint['lr_sch_state']["lrs"]
+    lr_sch.last_step = checkpoint['lr_sch_state']["last_step"]
+    lr_sch.base_lrs = checkpoint['lr_sch_state']["base_lrs"]
     data_portion = checkpoint["data_portion"]
     return model, opt, step, lr_sch, data_portion
 
@@ -259,6 +262,11 @@ def fine_tuning():
         # Load portion of processed data
         training_loader = load_training_data_portion(config, tokenizer, data_portion)
         
+        if config.RESUME:
+            data_portion -= 1
+            training_loader = data_process(config, tokenizer, "train", start_idx = step*16, end_idx = 80000 * (data_portion + 1))
+            config.RESUME = False
+
         data_portion += 1
         epoch = data_portion // 2
 

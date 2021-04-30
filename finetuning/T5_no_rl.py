@@ -107,8 +107,6 @@ def save_checkpoint(step, model, opt, lr_sch, loss, min_loss, amp, data_portion,
     checkpoint = {'step': step, 'model_state': model.state_dict(), "optimizer_state": opt.state_dict(),
             "lr_sch_state": lr_sch.state_dict(), "amp": amp, "data_portion": data_portion}
     
-    print(lr_sch.state_dict()==None)
-
     if last_model:
         model_name = f'{save_path}last_model{suffix}.ckpt'
         torch.save(checkpoint, model_name)
@@ -128,12 +126,11 @@ def load_checkpoint(PATH, model, opt, lr_sch):
     model.load_state_dict(checkpoint['model_state'])
     opt.load_state_dict(checkpoint['optimizer_state'])
     step = checkpoint['step']
-    lr_sch = lr_sch.load_state_dict(checkpoint['lr_sch_state'])
+    lr_sch.optimizer = opt
+    lr_sch.lrs = checkpoint['lr_sch_state']["lrs"]
+    lr_sch.last_step = checkpoint['lr_sch_state']["last_step"]
+    lr_sch.base_lrs = checkpoint['lr_sch_state']["base_lrs"]
     data_portion = checkpoint["data_portion"]
-    print(opt == None)
-    print(model == None)
-    print(step)
-    print(lr_sch)
 
     return model, opt, step, lr_sch, data_portion
 
@@ -208,7 +205,7 @@ def fine_tuning():
         DATA_DIR="/home/yurun/Documents/AutoCodeGeneration/data/finetuning/",
         RESUME_PATH="/home/yurun/Documents/AutoCodeGeneration/output/best_model_loss.ckpt",
         SAVE_PATH = "/home/yurun/Documents/AutoCodeGeneration/output/",
-        RESUME=False
+        RESUME=True
     )
 
     # tokenzier for encoding the text
@@ -246,7 +243,7 @@ def fine_tuning():
     #opt_level = "O1"
     #model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
     amp = None
-
+    
     # Load Saved Model
     if config.RESUME:
         print("Load saved model!")
@@ -266,6 +263,11 @@ def fine_tuning():
 
         # Load portion of processed data
         training_loader = load_training_data_portion(config, tokenizer, data_portion)
+        
+        if config.RESUME:
+            data_portion = data_portion -1
+            training_loader = data_process(config, tokenizer, "train", start_idx = step*16, end_idx = 80000 * (data_portion+1))
+            config.RESUME = False
         
         data_portion += 1
         epoch = data_portion // 2

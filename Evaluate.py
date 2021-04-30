@@ -47,17 +47,17 @@ def RL_of_loss(model, x_in, y, mask, loss, tokenizer):
 
     # Todo: Consider about this again
 
-    null_loss = w1 * (1 - np.mean(score1)) + w2 * (1 - np.mean(score2)) + loss.item()
+    null_loss = w1 * (1 - np.mean(score1)) + w2 * (1 - np.mean(score2))
 
     # print("*******"*10)
     # print(bz)
     # print(score2)
     # print(score1)
-    print(loss.item())
-    print(null_loss)
+    #print(loss.item())
+    #print(null_loss)
     # print("*******"*10)
 
-    loss_null = torch.tensor(null_loss).to(device=device)
+    loss_null = torch.tensor(2).to(device=device)
 
     loss.data = loss_null.data
 
